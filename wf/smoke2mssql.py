@@ -11,9 +11,11 @@ from operator import add, itemgetter
 import time
 import json
 import requests
+from requests.auth import HTTPBasicAuth
 import gzip
 
 def main(status, count, date_from, date_to, dag_stream, submitter, offline_mode=False):
+    return_code = 0
     ci_cycle_stat = list()
     ci_test_sessions_stat = list()
 
@@ -41,12 +43,12 @@ def main(status, count, date_from, date_to, dag_stream, submitter, offline_mode=
                 pickle.dump(ci_test_sessions_stat, cache)
         else:
             print('wrong dag stream format. use DAG:stream exp: CI_SMOKE__gfx-driver__master:gfx-driver__master')
-            return 1
+            return 100
     print(f'uploading cycles')
-    upload_to_mssql('smoke_ci_cycles', ci_cycle_stat)
+    return_code += upload_to_mssql('smoke_ci_cycles', ci_cycle_stat)
     print(f'uploading sessions')
-    upload_to_mssql('smoke_ci_sessions', ci_test_sessions_stat)
-    return 0
+    return_code += upload_to_mssql('smoke_ci_sessions', ci_test_sessions_stat)
+    return return_code
 
 
 def get_sessions_execution_time(dag_name, date_from, date_to):
@@ -60,6 +62,7 @@ def get_sessions_execution_time(dag_name, date_from, date_to):
     return sessions_execution_time_dict
 
 def upload_to_mssql(table_name, data_list_dict):
+    return_code = 0
     table_columns = get_table_columns(get_sql_table_config(table_name))
     print(f'table_name:{table_name}')
     #print(f'columns: {table_columns}')
@@ -70,8 +73,9 @@ def upload_to_mssql(table_name, data_list_dict):
     for values in insert_data:
         count += 1
         print(f'inserting {count}/{total}', end='\r', flush=True)
-        insert_mssql_data(table_name, table_columns , values)
+        return_code += insert_mssql_data(table_name, table_columns , values)
     print('DONE!                                                                       ')
+    return return_code
  
 
 def get_table_columns(sql_table_config):
@@ -118,12 +122,17 @@ def convert_input_data(table_name, input_list_dict, update=False):
     return output_data_list
 
 def insert_mssql_data(table_name, sql_keys, insert_values, print_only=False):
+    return_code = 0
+    global sql_user_pass
     sql_command = (f"INSERT INTO [dbo].{table_name} ({sql_keys}) \nVALUES ({insert_values});") 
     if print_only:
         print(sql_command)
     else:
         try:
-            conn = pyodbc.connect(Driver='{SQL Server}', Server='gksisql017n1.ger.corp.intel.com,3181', Database='GSE_CI', Trusted_Connection='Yes')
+            if len(sql_user_pass):
+                conn = pyodbc.connect(Driver='{SQL Server}', Server='gksisql017n1.ger.corp.intel.com,3181', Database='GSE_CI', UID=sql_user_pass[0], PWD=sql_user_pass[1])
+            else:
+                conn = pyodbc.connect(Driver='{SQL Server}', Server='gksisql017n1.ger.corp.intel.com,3181', Database='GSE_CI', Trusted_Connection='Yes')
             cursor = conn.cursor()
             cursor.execute(sql_command)
             conn.commit()
@@ -135,9 +144,11 @@ def insert_mssql_data(table_name, sql_keys, insert_values, print_only=False):
             print(f'\n{insert_values} \nnot inserted\n\n')
             print('\n')
             print(err)
-    return 0
+            return_code = 1
+    return return_code
 
 def update_mssql_data(table_name, id, sql_key_values, print_only=False):
+    global sql_user_pass
     sql_table_config = get_sql_table_config(table_name)
     id_column = sql_table_config[1]['column_name']
     sql_command = (f"UPDATE [dbo].{table_name} SET {sql_key_values} WHERE {id_column} = {id} ;") 
@@ -145,7 +156,10 @@ def update_mssql_data(table_name, id, sql_key_values, print_only=False):
         print(sql_command)
     else:
         try:
-            conn = pyodbc.connect(Driver='{SQL Server}', Server='gksisql017n1.ger.corp.intel.com,3181', Database='GSE_CI', Trusted_Connection='Yes')
+            if len(sql_user_pass):
+                conn = pyodbc.connect(Driver='{SQL Server}', Server='gksisql017n1.ger.corp.intel.com,3181', Database='GSE_CI', UID=sql_user_pass[0], PWD=sql_user_pass[1])
+            else:
+                conn = pyodbc.connect(Driver='{SQL Server}', Server='gksisql017n1.ger.corp.intel.com,3181', Database='GSE_CI', Trusted_Connection='Yes')
             cursor = conn.cursor()
             cursor.execute(sql_command)
             conn.commit()
@@ -159,6 +173,7 @@ def update_mssql_data(table_name, id, sql_key_values, print_only=False):
     return 0
     
 def get_mssql_data(table_name, columns='all', print_only=False):
+    global sql_user_pass
     data_list = list()
     if columns == 'all':
         columns = get_table_columns(get_sql_table_config(table_name))
@@ -167,7 +182,10 @@ def get_mssql_data(table_name, columns='all', print_only=False):
         print(query)
     else:
         try:
-            conn = pyodbc.connect(Driver='{SQL Server}', Server='gksisql017n1.ger.corp.intel.com,3181', Database='GSE_CI', Trusted_Connection='Yes')
+            if len(sql_user_pass):
+                conn = pyodbc.connect(Driver='{SQL Server}', Server='gksisql017n1.ger.corp.intel.com,3181', Database='GSE_CI', UID=sql_user_pass[0], PWD=sql_user_pass[1], sslverify=0, encrypt=0 )
+            else:
+                conn = pyodbc.connect(Driver='{SQL Server}', Server='gksisql017n1.ger.corp.intel.com,3181', Database='GSE_CI', Trusted_Connection='Yes')
             cursor = conn.cursor()
             cursor.execute(query)
             row_data = cursor.fetchall()
@@ -371,13 +389,13 @@ def get_ci_cycle_session_stat(ci_cycles):
                         for category in session['test_session_failure']['categories']:
                             if category['selected']:
                                 failure_category_set.add(category['name'])
-                                reason_set = set()
+                                category_reason_list = list()
                                 for reason in category['values']:
                                     if reason['selected']:
                                         # WA for "GTA (WF, RES, TP)" - > "GTA (WF-RES-TP)"
-                                        reason_set.add(reason['name'].replace(', ','-'))
-                                if len(reason_set) > 0:
-                                    failure_reasons_set.add(f"{category['name']}:{','.join(reason_set)}")
+                                        category_reason_list.append(f"{category['name']}:{reason['name'].replace(', ','-')}")
+                                if len(category_reason_list) > 0:
+                                    failure_reasons_set.add(f"{','.join(category_reason_list)}")
                                 else:
                                     failure_reasons_set.add(category['name'])
                     if len(failure_reasons_set) > 0:
@@ -709,12 +727,14 @@ def post_gta_data(url, data):
         print(response)
     return output
 
-def get_gta_data(url, page=None):
+def get_gta_data(url):
+    global user_pass
     output = None
     headers = { 'Content-type': 'application/json' }
-    if page:
-        url += f'&page={page}'
-    response = requests.get(url, headers=headers, proxies={'http': 'http://proxy-chain.intel.com:911', 'https': 'http://proxy-chain.intel.com:912' })
+    if len(user_pass) == 2:
+        response = requests.get(url, auth=HTTPBasicAuth(user_pass[0], user_pass[1]), headers=headers, proxies={'http': 'http://proxy-chain.intel.com:911', 'https': 'http://proxy-chain.intel.com:912' })
+    else:
+        response = requests.get(url, headers=headers, proxies={'http': 'http://proxy-chain.intel.com:911', 'https': 'http://proxy-chain.intel.com:912' })
     if response.status_code == 200:
         output = response
     else:
@@ -737,9 +757,30 @@ def get_gta_cycles_pages(url):
     return cycles_list
 
 def get_gtax_data(url):
+    global user_pass
     headers = { 'Content-type': 'application/json' }
-    response = requests.get(url, headers=headers, proxies={'http': 'http://proxy-chain.intel.com:911', 'https': 'http://proxy-chain.intel.com:912' })
+    if len(user_pass) == 2:
+        response = requests.get(url, auth=HTTPBasicAuth(user_pass[0], user_pass[1]), headers=headers, proxies={'http': 'http://proxy-chain.intel.com:911', 'https': 'http://proxy-chain.intel.com:912' }, verify=False)
+    else:
+        response = requests.get(url, headers=headers, proxies={'http': 'http://proxy-chain.intel.com:911', 'https': 'http://proxy-chain.intel.com:912' })
     return response.json()
+
+def get_gta_data(url, page=None):
+    global user_pass
+    output = None
+    headers = { 'Content-type': 'application/json' }
+    if page:
+        url += f'&page={page}'
+    if len(user_pass) == 2:
+        response = requests.get(url, auth=HTTPBasicAuth(user_pass[0], user_pass[1]), headers=headers, proxies={'http': 'http://proxy-chain.intel.com:911', 'https': 'http://proxy-chain.intel.com:912' }, verify=False)
+    else:
+        response = requests.get(url, headers=headers, proxies={'http': 'http://proxy-chain.intel.com:911', 'https': 'http://proxy-chain.intel.com:912' })
+    if response.status_code == 200:
+        output = response
+    else:
+        print(response.status_code)
+        print(response)
+    return output
 
 def get_filename_timestamp():
     ts = str(datetime.now())
@@ -789,17 +830,29 @@ def cache_json_load(gzip_file_name):
     return data
 
 if __name__ == '__main__':
+    user_pass = list()
+    sql_user_pass = list()
     ts = get_filename_timestamp()
     filename = f'smoke_tpt_report_{ts}.xlsx'
     ap = argparse.ArgumentParser()
     ap.add_argument('-s', '-status', default='DEFAULT', help='status filter values: [NEW, IN PROGRESS ,COMPLETED, ERROR, TIMEOUT, INCOMPLETE]', required=False)
     ap.add_argument('-i', '-interactive', action='store_true', default=False, help='interactive mode', required=False)
-    ap.add_argument('-f', '-date_from', default=get_date_n_days_ago(7), help='date from format yyyy-mm-dd', required=False)
+    ap.add_argument('-f', '-date_from', default=get_date_n_days_ago(3), help='date from format yyyy-mm-dd', required=False)
     ap.add_argument('-t', '-date_to', default=get_date_n_days_ago(1), help='date to format yyyy-mm-dd', required=False)
     ap.add_argument('-submitter', default='sys_gtawf', help='submitter default:sys_gtawf', required=False)
     ap.add_argument('-dag', default='CI_SMOKE__gfx-driver__master:gfx-driver__master', help='DAG stream default: CI_SMOKE__gfx-driver__master:gfx-driver__master', required=False)
     ap.add_argument('-upload_only', action='store_true', default=False, help='no cache for gtax api calls (could be use to update cache)', required=False)
+    ap.add_argument('-login', default='', help='login', required=False)
+    ap.add_argument('-password', default='', help='password', required=False)
+    ap.add_argument('-sql_login', default='', help='sql login', required=False)
+    ap.add_argument('-sql_password', default='', help='sql password', required=False)
     parsed = ap.parse_args()
+    if len(parsed.login) > 1 and len(parsed.password) > 1:
+        user_pass.append(parsed.login)
+        user_pass.append(parsed.password)
+    if len(parsed.sql_login) > 1 and len(parsed.sql_password) > 1:
+        sql_user_pass.append(parsed.sql_login)
+        sql_user_pass.append(parsed.sql_password)
     date_from = parsed.f
     date_to = parsed.t
     if parsed.i:
