@@ -5,6 +5,7 @@ import re
 import os.path
 import argparse
 import pickle
+import platform
 from datetime import datetime
 from datetime import timedelta
 from operator import add, itemgetter
@@ -112,14 +113,15 @@ def get_ids(data_dict_list, column_name):
 def set_mssql_data(server, database, query):
     return_code = 0
     global sql_user_pass
+    global sql_driver
     print('sql update:')
     print(query)
     #conn = pyodbc.connect(Driver='{SQL Server}', Server='GKISQL1601.ger.corp.intel.com,3180', Database='vpgci', Trusted_Connection='Yes')
     try:
         if len(sql_user_pass):
-            conn = pyodbc.connect(Driver='{SQL Server}', Server=server, Database=database, UID=sql_user_pass[0], PWD=sql_user_pass[1])
+            conn = pyodbc.connect(Driver=f'{sql_driver}', Server=server, Database=database, UID=sql_user_pass[0], PWD=sql_user_pass[1], sslverify='no', encrypt='no' )
         else:
-            conn = pyodbc.connect(Driver='{SQL Server}', Server=server, Database=database, Trusted_Connection='Yes')
+            conn = pyodbc.connect(Driver=f'{sql_driver}', Server=server, Database=database, Trusted_Connection='Yes')
         cursor = conn.cursor()
         cursor.execute(query)
         conn.commit()
@@ -136,11 +138,12 @@ def set_mssql_data(server, database, query):
 def get_mssql_data(server, database, query):
     #print(query)
     global sql_user_pass
+    global sql_driver
     #conn = pyodbc.connect(Driver='{SQL Server}', Server='GKISQL1601.ger.corp.intel.com,3180', Database='vpgci', Trusted_Connection='Yes')
     if len(sql_user_pass):
-        conn = pyodbc.connect(Driver='{SQL Server}', Server=server, Database=database, UID=sql_user_pass[0], PWD=sql_user_pass[1])
+        conn = pyodbc.connect(Driver=f'{sql_driver}', Server=server, Database=database, UID=sql_user_pass[0], PWD=sql_user_pass[1], sslverify='no', encrypt='no' )
     else:
-        conn = pyodbc.connect(Driver='{SQL Server}', Server=server, Database=database, Trusted_Connection='Yes')
+        conn = pyodbc.connect(Driver=f'{sql_driver}', Server=server, Database=database, Trusted_Connection='Yes')
     cursor = conn.cursor()
     cursor.execute(query)
     columns = [column[0] for column in cursor.description]
@@ -149,6 +152,17 @@ def get_mssql_data(server, database, query):
         mssql_data.append(dict(zip(columns, row)))
     #cursor.fetchall()
     return mssql_data
+
+def get_sql_driver(driver_select):
+    sql_driver = None
+    if driver_select:
+        sql_driver = driver_select
+    else:
+        if platform.system() == 'Linux':
+            sql_driver = '{ODBC Driver 18 for SQL Server}'
+        else:
+            sql_driver = '{SQL Server}'
+    return sql_driver
 
 
 def get_cycles(dag_id, stream, submitter=None, date_from=None, date_to=None, status=None, count=100):
@@ -470,6 +484,7 @@ if __name__ == '__main__':
     ap.add_argument('-password', default='', help='password', required=False)
     ap.add_argument('-sql_login', default='', help='sql login', required=False)
     ap.add_argument('-sql_password', default='', help='sql password', required=False)
+    ap.add_argument('-sql_driver', default=None, help='SQL driver name', required=False)
     parsed = ap.parse_args()
     if len(parsed.login) > 1 and len(parsed.password) > 1:
         user_pass.append(parsed.login)
@@ -477,6 +492,8 @@ if __name__ == '__main__':
     if len(parsed.sql_login) > 1 and len(parsed.sql_password) > 1:
         sql_user_pass.append(parsed.sql_login)
         sql_user_pass.append(parsed.sql_password)
+    sql_driver = get_sql_driver(parsed.sql_driver)
+    print(sql_driver)
     date_from = parsed.f
     date_to = parsed.t
     if parsed.i:
