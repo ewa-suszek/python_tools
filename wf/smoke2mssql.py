@@ -5,6 +5,7 @@ import re
 import os.path
 import argparse
 import pickle
+import platform
 from datetime import datetime
 from datetime import timedelta
 from operator import add, itemgetter
@@ -124,15 +125,16 @@ def convert_input_data(table_name, input_list_dict, update=False):
 def insert_mssql_data(table_name, sql_keys, insert_values, print_only=False):
     return_code = 0
     global sql_user_pass
+    global sql_driver
     sql_command = (f"INSERT INTO [dbo].{table_name} ({sql_keys}) \nVALUES ({insert_values});") 
     if print_only:
         print(sql_command)
     else:
         try:
             if len(sql_user_pass):
-                conn = pyodbc.connect(Driver='{SQL Server}', Server='gksisql017n1.ger.corp.intel.com,3181', Database='GSE_CI', UID=sql_user_pass[0], PWD=sql_user_pass[1])
+                conn = pyodbc.connect(Driver=f'{sql_driver}', Server='gksisql017n1.ger.corp.intel.com,3181', Database='GSE_CI', UID=sql_user_pass[0], PWD=sql_user_pass[1])
             else:
-                conn = pyodbc.connect(Driver='{SQL Server}', Server='gksisql017n1.ger.corp.intel.com,3181', Database='GSE_CI', Trusted_Connection='Yes')
+                conn = pyodbc.connect(Driver=f'{sql_driver}', Server='gksisql017n1.ger.corp.intel.com,3181', Database='GSE_CI', Trusted_Connection='Yes')
             cursor = conn.cursor()
             cursor.execute(sql_command)
             conn.commit()
@@ -149,6 +151,7 @@ def insert_mssql_data(table_name, sql_keys, insert_values, print_only=False):
 
 def update_mssql_data(table_name, id, sql_key_values, print_only=False):
     global sql_user_pass
+    global sql_driver
     sql_table_config = get_sql_table_config(table_name)
     id_column = sql_table_config[1]['column_name']
     sql_command = (f"UPDATE [dbo].{table_name} SET {sql_key_values} WHERE {id_column} = {id} ;") 
@@ -157,9 +160,9 @@ def update_mssql_data(table_name, id, sql_key_values, print_only=False):
     else:
         try:
             if len(sql_user_pass):
-                conn = pyodbc.connect(Driver='{SQL Server}', Server='gksisql017n1.ger.corp.intel.com,3181', Database='GSE_CI', UID=sql_user_pass[0], PWD=sql_user_pass[1])
+                conn = pyodbc.connect(Driver=f'{sql_driver}', Server='gksisql017n1.ger.corp.intel.com,3181', Database='GSE_CI', UID=sql_user_pass[0], PWD=sql_user_pass[1])
             else:
-                conn = pyodbc.connect(Driver='{SQL Server}', Server='gksisql017n1.ger.corp.intel.com,3181', Database='GSE_CI', Trusted_Connection='Yes')
+                conn = pyodbc.connect(Driver=f'{sql_driver}', Server='gksisql017n1.ger.corp.intel.com,3181', Database='GSE_CI', Trusted_Connection='Yes')
             cursor = conn.cursor()
             cursor.execute(sql_command)
             conn.commit()
@@ -174,6 +177,7 @@ def update_mssql_data(table_name, id, sql_key_values, print_only=False):
     
 def get_mssql_data(table_name, columns='all', print_only=False):
     global sql_user_pass
+    global sql_driver
     data_list = list()
     if columns == 'all':
         columns = get_table_columns(get_sql_table_config(table_name))
@@ -183,9 +187,9 @@ def get_mssql_data(table_name, columns='all', print_only=False):
     else:
         try:
             if len(sql_user_pass):
-                conn = pyodbc.connect(Driver='{SQL Server}', Server='gksisql017n1.ger.corp.intel.com,3181', Database='GSE_CI', UID=sql_user_pass[0], PWD=sql_user_pass[1], sslverify=0, encrypt=0 )
+                conn = pyodbc.connect(Driver=f'{sql_driver}', Server='gksisql017n1.ger.corp.intel.com,3181', Database='GSE_CI', UID=sql_user_pass[0], PWD=sql_user_pass[1], sslverify=0, encrypt=0 )
             else:
-                conn = pyodbc.connect(Driver='{SQL Server}', Server='gksisql017n1.ger.corp.intel.com,3181', Database='GSE_CI', Trusted_Connection='Yes')
+                conn = pyodbc.connect(Driver=f'{sql_driver}', Server='gksisql017n1.ger.corp.intel.com,3181', Database='GSE_CI', Trusted_Connection='Yes')
             cursor = conn.cursor()
             cursor.execute(query)
             row_data = cursor.fetchall()
@@ -194,6 +198,18 @@ def get_mssql_data(table_name, columns='all', print_only=False):
         except pyodbc.DatabaseError as err:
             raise err
     return data_list
+
+def get_sql_driver(driver_select):
+    sql_driver = None
+    if driver_select:
+        sql_driver = driver_select
+    else:
+        if platform.system() == 'Linux':
+            sql_driver = '{ODBC Driver 18 for SQL Server}'
+        else:
+            sql_driver = '{SQL Server}'
+    return sql_driver
+
 
 def pyodbc_row_to_dict_list(columns, row_data):
     dict_list = list()
@@ -846,6 +862,7 @@ if __name__ == '__main__':
     ap.add_argument('-password', default='', help='password', required=False)
     ap.add_argument('-sql_login', default='', help='sql login', required=False)
     ap.add_argument('-sql_password', default='', help='sql password', required=False)
+    ap.add_argument('-sql_driver', default=None, help='SQL driver name', required=False)
     parsed = ap.parse_args()
     if len(parsed.login) > 1 and len(parsed.password) > 1:
         user_pass.append(parsed.login)
@@ -853,6 +870,8 @@ if __name__ == '__main__':
     if len(parsed.sql_login) > 1 and len(parsed.sql_password) > 1:
         sql_user_pass.append(parsed.sql_login)
         sql_user_pass.append(parsed.sql_password)
+    sql_driver = get_sql_driver(parsed.sql_driver)
+    print(sql_driver)
     date_from = parsed.f
     date_to = parsed.t
     if parsed.i:
