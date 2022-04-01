@@ -187,7 +187,7 @@ def get_mssql_data(table_name, columns='all', print_only=False):
     else:
         try:
             if len(sql_user_pass):
-                conn = pyodbc.connect(Driver=f'{sql_driver}', Server='gksisql017n1.ger.corp.intel.com,3181', Database='GSE_CI', UID=sql_user_pass[0], PWD=sql_user_pass[1])
+                conn = pyodbc.connect(Driver=f'{sql_driver}', Server='gksisql017n1.ger.corp.intel.com,3181', Database='GSE_CI', UID=sql_user_pass[0], PWD=sql_user_pass[1], sslverify=0)
             else:
                 conn = pyodbc.connect(Driver=f'{sql_driver}', Server='gksisql017n1.ger.corp.intel.com,3181', Database='GSE_CI', Trusted_Connection='Yes')
             cursor = conn.cursor()
